@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>아기 한 달 영양 식단 대시보드</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0"></script>
+    <!-- Chosen Palette: Warm Neutrals -->
+    <!-- Application Structure Plan: 이 SPA는 월간 대시보드 형식으로 확장되었습니다. 초기 화면에서는 대표적인 주간 영양소 분포 차트를 보여주어 식단의 전반적인 균형을 제시합니다. 상단에는 9월 3일부터 30일까지 모든 날짜를 선택할 수 있는 스크롤 가능한 내비게이션 바를 배치했습니다. 사용자는 이 바를 통해 특정 날짜로 즉시 이동하여 해당일의 상세 메뉴와 필요 재료를 카드 형태로 확인할 수 있습니다. 각 메뉴 카드에는 Gemini API와 연동된 '레시피 보기' 버튼이 있어, 사용자가 필요할 때마다 즉석에서 아기 맞춤형 레시피를 생성할 수 있도록 했습니다. 이 구조는 한 달이라는 긴 기간의 정보를 체계적으로 탐색하고, 각 일자에 대한 구체적인 실행 계획(요리법)까지 유기적으로 연결하여 사용자의 편의성을 극대화하기 위해 설계되었습니다. -->
+    <!-- Visualization & Content Choices: 영양소 분포는 Chart.js의 도넛 차트를 사용하여 시각적으로 이해하기 쉬운 대표 예시를 제공합니다. 한 달치 식단 정보는 '스크롤 가능한 날짜 네비게이션'과 '선택된 날짜의 상세 정보 카드'라는 UI 패턴을 통해 제공됩니다. 이는 많은 양의 정보를 효과적으로 분할하여 보여주는 방식입니다. 핵심 기능인 Gemini API 연동 레시피 생성은 각 메뉴 옆 버튼 클릭으로 트리거되며, 이는 사용자가 정보를 단순히 소비하는 것을 넘어 실제 요리라는 행동으로 전환하는 데 가장 직접적인 도움을 주는 상호작용입니다. -->
+    <!-- CONFIRMATION: NO SVG graphics used. NO Mermaid JS used. -->
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;700&display=swap');
+        body { font-family: 'Noto Sans KR', sans-serif; }
+        .nav-container { scrollbar-width: none; -ms-overflow-style: none; }
+        .nav-container::-webkit-scrollbar { display: none; }
+        .nav-btn { transition: all 0.3s ease; flex-shrink: 0; }
+        .nav-btn.active {
+            background-color: #A58D78;
+            color: #FDFBF8;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+        }
+        .content-view { display: none; }
+        .content-view.active { display: block; }
+        .chart-container { position: relative; width: 100%; max-width: 450px; margin: auto; height: 300px; max-height: 400px; }
+        @media (min-width: 640px) { .chart-container { height: 400px; } }
+        .modal-backdrop { transition: opacity 0.3s ease; }
+        .modal-content { transition: transform 0.3s ease; }
+        .loader { border-top-color: #A58D78; animation: spin 1s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body class="bg-[#FDFBF8]">
+
+    <div class="container mx-auto p-4 sm:p-6 md:p-8 max-w-7xl">
+        <header class="text-center mb-6">
+            <h1 class="text-4xl font-bold text-[#6F5E53]">아기를 위한 9월 영양 식단</h1>
+            <p class="mt-2 text-[#8C7B70]">한 달간의 영양 계획과 Gemini ✨ 추천 레시피를 확인하세요.</p>
+        </header>
+
+        <div class="relative mb-8">
+             <div id="date-nav-container" class="nav-container flex items-center gap-2 overflow-x-auto pb-4">
+                <button data-view="dashboard" class="nav-btn active text-sm sm:text-base font-semibold py-2 px-4 rounded-full bg-[#EFEAE5] text-[#6F5E53] hover:bg-[#A58D78] hover:text-white">🗓️ 대시보드</button>
+                <!-- Date buttons will be dynamically inserted here -->
+            </div>
+        </div>
+
+        <main id="content-area">
+            <div id="dashboard-view" class="content-view active">
+                 <div class="bg-white/50 rounded-2xl shadow-lg p-6 backdrop-blur-sm">
+                    <h2 class="text-2xl font-bold text-center text-[#6F5E53] mb-2">대표 주간 영양소 분포</h2>
+                    <p class="text-center text-[#8C7B70] mb-6">한 달 식단은 이와 같은 영양 균형을 바탕으로 구성되었습니다.</p>
+                    <div class="chart-container">
+                        <canvas id="nutritionChart"></canvas>
+                    </div>
+                </div>
+            </div>
+             <!-- Daily views will be dynamically inserted here -->
+        </main>
+    </div>
+
+    <div id="recipe-modal" class="modal-backdrop fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center p-4 opacity-0 pointer-events-none z-50">
+        <div class="modal-content bg-white rounded-2xl shadow-xl w-full max-w-lg p-6 relative transform scale-95 max-h-[90vh] overflow-y-auto">
+            <button id="close-modal-btn" class="absolute top-4 right-4 text-gray-500 hover:text-gray-800 text-2xl z-10">&times;</button>
+            <h3 id="modal-title" class="text-2xl font-bold text-[#6F5E53] mb-4">✨ 추천 레시피</h3>
+            <div id="modal-loader" class="flex justify-center items-center h-48"><div class="loader ease-linear rounded-full border-4 border-t-4 border-gray-200 h-12 w-12"></div></div>
+            <div id="modal-body" class="text-[#6F5E53] prose max-w-none"></div>
+        </div>
+    </div>
+
+    <script>
+        const mealData = {
+            '20250903': { date: '9/3 (수)', meals: [{ t: '아침', m: '소고기 미역죽, 백김치' },{ t: '점심', m: '닭고기 채소 덮밥, 찐 브로콜리' },{ t: '저녁', m: '두부계란찜, 김가루, 쌀밥' }], i: { '육류': '소고기, 닭고기', '채소': '미역, 각종 채소, 브로콜리', '기타': '백김치, 두부, 계란, 김, 쌀' } },
+            '20250904': { date: '9/4 (목)', meals: [{ t: '아침', m: '단호박 퓨레, 플레인 요거트' },{ t: '점심', m: '대구살 감자조림, 시금치나물' },{ t: '저녁', m: '돼지고기 완자, 파프리카볶음' }], i: { '육류': '대구살, 돼지고기', '채소': '단호박, 감자, 시금치, 파프리카', '기타': '요거트' } },
+            '20250905': { date: '9/5 (금)', meals: [{ t: '아침', m: '계란 스크램블, 아보카도' },{ t: '점심', m: '소고기 뭇국, 애호박전' },{ t: '저녁', m: '닭고기 안심구이, 버섯볶음' }], i: { '육류': '소고기, 닭고기', '채소': '아보카도, 무, 애호박, 버섯', '기타': '계란' } },
+            '20250906': { date: '9/6 (토)', meals: [{ t: '아침', m: '고구마 사과 매시, 치즈' },{ t: '점심', m: '새우살 채소 리조또' },{ t: '저녁', m: '소고기 콩나물밥, 맑은 된장국' }], i: { '육류': '새우, 소고기', '채소': '고구마, 사과, 각종 채소, 콩나물', '기타': '치즈, 아기된장' } },
+            '20250907': { date: '9/7 (일)', meals: [{ t: '아침', m: '감자전, 으깬 바나나' },{ t: '점심', m: '닭백숙, 부드러운 찹쌀죽' },{ t: '저녁', m: '연두부 채소찜, 김자반' }], i: { '육류': '닭고기', '채소': '감자, 바나나, 각종 채소', '기타': '찹쌀, 연두부, 김' } },
+            '20250908': { date: '9/8 (월)', meals: [{ t: '아침', m: '오트밀, 배 퓨레' },{ t: '점심', m: '돼지고기 김치찜(아기용 백김치), 쌀밥' },{ t: '저녁', m: '동태전, 두부부침' }], i: { '육류': '돼지고기, 동태살', '채소': '배, 백김치', '기타': '오트밀, 두부' } },
+            '20250909': { date: '9/9 (화)', meals: [{ t: '아침', m: '소고기 주먹밥, 계란국' },{ t: '점심', m: '닭고기 카레(아기용), 쌀밥' },{ t: '저녁', m: '가자미구이, 애호박볶음' }], i: { '육류': '소고기, 닭고기, 가자미', '채소': '애호박, 카레용 채소', '기타': '계란, 아기카레' } },
+            '20250910': { date: '9/10 (수)', meals: [{ t: '아침', m: '두부 스크램블, 찐 당근' },{ t: '점심', m: '소고기 가지덮밥' },{ t: '저녁', m: '닭고기 완자탕, 쌀밥' }], i: { '육류': '소고기, 닭고기', '채소': '당근, 가지', '기타': '두부' } },
+            '20250911': { date: '9/11 (목)', meals: [{ t: '아침', m: '새우 애호박죽' },{ t: '점심', m: '돼지고기 숙주볶음, 쌀밥' },{ t: '저녁', m: '대구살 맑은탕, 버섯들깨무침' }], i: { '육류': '새우, 돼지고기, 대구살', '채소': '애호박, 숙주, 버섯', '기타': '들깨가루' } },
+            '20250912': { date: '9/12 (금)', meals: [{ t: '아침', m: '닭고기 아보카도 비빔밥' },{ t: '점심', m: '소고기 팽이버섯전, 백김치' },{ t: '저녁', m: '두부 스테이크, 찐 아스파라거스' }], i: { '육류': '닭고기, 소고기', '채소': '아보카도, 팽이버섯, 아스파라거스', '기타': '두부, 백김치' } },
+            '20250913': { date: '9/13 (토)', meals: [{ t: '아침', m: '감자 양파 수프' },{ t: '점심', m: '소고기 짜장밥(아기용)' },{ t: '저녁', m: '연어 스테이크, 매시드 포테이토' }], i: { '육류': '소고기, 연어', '채소': '감자, 양파, 짜장용 채소', '기타': '아기짜장' } },
+            '20250914': { date: '9/14 (일)', meals: [{ t: '아침', m: '계란찜, 찐 고구마' },{ t: '점심', m: '전복죽' },{ t: '저녁', m: '오리주물럭(아기용 간장양념), 부추무침' }], i: { '육류': '전복, 오리고기', '채소': '고구마, 부추', '기타': '계란' } },
+            '20250915': { date: '9/15 (월)', meals: [{ t: '아침', m: '소고기 콜리플라워 퓨레' },{ t: '점심', m: '닭곰탕, 쌀밥' },{ t: '저녁', m: '돼지고기 두부조림, 청경채볶음' }], i: { '육류': '소고기, 닭고기, 돼지고기', '채소': '콜리플라워, 청경채', '기타': '두부' } },
+            '20250916': { date: '9/16 (화)', meals: [{ t: '아침', m: '새우살 계란 볶음밥' },{ t: '점심', m: '황태국, 감자채볶음' },{ t: '저녁', m: '소고기 찹쌀구이, 찐 양배추' }], i: { '육류': '새우, 황태, 소고기', '채소': '감자, 양배추', '기타': '계란, 찹쌀가루' } },
+            '20250917': { date: '9/17 (수)', meals: [{ t: '아침', m: '닭가슴살 샐러드(잘게 찢어), 찐 단호박' },{ t: '점심', m: '삼치구이, 된장국' },{ t: '저녁', m: '소고기 비빔밥 (나물과 함께)' }], i: { '육류': '닭가슴살, 삼치, 소고기', '채소': '단호박, 각종 나물', '기타': '아기된장' } },
+            '20250918': { date: '9/18 (목)', meals: [{ t: '아침', m: '연두부, 바나나' },{ t: '점심', m: '돼지고기 덮밥, 맑은 콩나물국' },{ t: '저녁', m: '닭봉조림(간장), 웨지감자' }], i: { '육류': '돼지고기, 닭봉', '채소': '바나나, 콩나물, 감자', '기타': '연두부' } },
+            '20250919': { date: '9/19 (금)', meals: [{ t: '아침', m: '소고기 야채죽' },{ t: '점심', m: '임연수어 구이, 브로콜리 무침' },{ t: '저녁', m: '두부 함박스테이크' }], i: { '육류': '소고기, 임연수어', '채소': '브로콜리, 각종 야채', '기타': '두부' } },
+            '20250920': { date: '9/20 (토)', meals: [{ t: '아침', m: '치즈볼, 사과' },{ t: '점심', m: '해물 리조또 (새우, 아기용 조갯살)' },{ t: '저녁', m: '돼지갈비찜(아기용), 버섯볶음' }], i: { '육류': '새우, 조갯살, 돼지갈비', '채소': '사과, 버섯', '기타': '아기치즈' } },
+            '20250921': { date: '9/21 (일)', meals: [{ t: '아침', m: '계란말이, 찐 애호박' },{ t: '점심', m: '닭칼국수(면 대신 밥), 김가루' },{ t: '저녁', m: '소고기 안심구이, 아스파라거스 구이' }], i: { '육류': '닭고기, 소고기 안심', '채소': '애호박, 아스파라거스', '기타': '계란, 김' } },
+            '20250922': { date: '9/22 (월)', meals: [{ t: '아침', m: '흑임자죽' },{ t: '점심', m: '고등어구이, 콩나물무침' },{ t: '저녁', m: '돼지고기 완자조림, 쌀밥' }], i: { '육류': '고등어, 돼지고기', '채소': '콩나물', '기타': '흑임자' } },
+            '20250923': { date: '9/23 (화)', meals: [{ t: '아침', m: '소고기 무죽' },{ t: '점심', m: '닭안심 파프리카 볶음밥' },{ t: '저녁', m: '생선전, 시금치 된장국' }], i: { '육류': '소고기, 닭안심, 흰살생선', '채소': '무, 파프리카, 시금치', '기타': '아기된장' } },
+            '20250924': { date: '9/24 (수)', meals: [{ t: '아침', m: '아보카도 계란 비빔밥' },{ t: '점심', m: '소고기 떡갈비, 팽이버섯 구이' },{ t: '저녁', m: '대구살 맑은국, 두부조림' }], i: { '육류': '소고기, 대구살', '채소': '아보카도, 팽이버섯', '기타': '계란, 두부' } },
+            '20250925': { date: '9/25 (목)', meals: [{ t: '아침', m: '치즈 얹은 단호박 찜' },{ t: '점심', m: '닭고기 채소 카레(아기용)' },{ t: '저녁', m: '돼지고기 애호박 찌개, 쌀밥' }], i: { '육류': '닭고기, 돼지고기', '채소': '단호박, 애호박, 카레용 채소', '기타': '치즈, 아기카레' } },
+            '20250926': { date: '9/26 (금)', meals: [{ t: '아침', m: '연두부 들깨탕' },{ t: '점심', m: '소고기 숙주 덮밥' },{ t: '저녁', m: '새우살 완자, 브로콜리 데침' }], i: { '육류': '소고기, 새우', '채소': '숙주, 브로콜리', '기타': '연두부, 들깨가루' } },
+            '20250927': { date: '9/27 (토)', meals: [{ t: '아침', m: '밥새우 주먹밥, 계란국' },{ t: '점심', m: '안동찜닭(아기용 순한맛)' },{ t: '저녁', m: '갈치구이, 무나물' }], i: { '육류': '밥새우, 닭고기, 갈치', '채소': '무, 찜닭용 채소', '기타': '계란' } },
+            '20250928': { date: '9/28 (일)', meals: [{ t: '아침', m: '감자수프' },{ t: '점심', m: '오리고기 구이, 부추겉절이' },{ t: '저녁', m: '해물순두부(맵지 않게), 쌀밥' }], i: { '육류': '오리고기, 새우, 조갯살', '채소': '감자, 부추', '기타': '순두부' } },
+            '20250929': { date: '9/29 (월)', meals: [{ t: '아침', m: '닭죽' },{ t: '점심', m: '소고기 가지볶음, 쌀밥' },{ t: '저녁', m: '두부전, 멸치볶음(아기용)' }], i: { '육류': '닭고기, 소고기', '채소': '가지', '기타': '두부, 잔멸치' } },
+            '20250930': { date: '9/30 (화)', meals: [{ t: '아침', m: '고구마 라떼(따뜻하게)' },{ t: '점심', m: '돼지고기 청경채 덮밥' },{ t: '저녁', m: '동그랑땡, 맑은 배춧국' }], i: { '육류': '돼지고기', '채소': '고구마, 청경채, 배추', '기타': '우유 또는 분유' } }
+        };
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const dateNavContainer = document.getElementById('date-nav-container');
+            const contentArea = document.getElementById('content-area');
+            const modal = document.getElementById('recipe-modal');
+            const modalContent = modal.querySelector('.modal-content');
+            const closeModalBtn = document.getElementById('close-modal-btn');
+            const modalTitle = document.getElementById('modal-title');
+            const modalBody = document.getElementById('modal-body');
+            const modalLoader = document.getElementById('modal-loader');
+
+            function setupUI() {
+                Object.keys(mealData).forEach(dayKey => {
+                    const dayData = mealData[dayKey];
+                    const dateBtn = document.createElement('button');
+                    dateBtn.className = "nav-btn text-sm sm:text-base font-semibold py-2 px-4 rounded-full bg-[#EFEAE5] text-[#6F5E53] hover:bg-[#A58D78] hover:text-white";
+                    dateBtn.textContent = dayData.date;
+                    dateBtn.dataset.view = dayKey;
+                    dateNavContainer.appendChild(dateBtn);
+                    contentArea.innerHTML += createDailyView(dayKey, dayData);
+                });
+            }
+
+            function createDailyView(dayKey, data) {
+                let mealsHtml = data.meals.map(meal => `
+                    <div class="mb-4 flex justify-between items-center gap-2">
+                        <div class="flex-1">
+                            <h4 class="font-semibold text-lg text-[#A58D78]">${meal.t}</h4>
+                            <p class="text-[#6F5E53]">${meal.m}</p>
+                        </div>
+                        <button class="generate-recipe-btn text-xs font-bold bg-[#A58D78] text-white py-1 px-3 rounded-full hover:bg-[#6F5E53] transition-colors" data-day="${dayKey}" data-meal="${meal.m}">✨ 레시피 보기</button>
+                    </div>
+                `).join('');
+                let ingredientsHtml = Object.entries(data.i).map(([cat, items]) => `
+                     <div class="mb-3"><h4 class="font-semibold text-md text-[#A58D78]">${cat}</h4><p class="text-sm text-[#6F5E53]">${items}</p></div>
+                `).join('');
+
+                return `
+                    <div id="${dayKey}-view" class="content-view">
+                        <h2 class="text-2xl font-bold text-center text-[#6F5E53] mb-6">${data.date} 식단</h2>
+                        <div class="grid md:grid-cols-2 gap-6">
+                            <div class="bg-white/50 rounded-2xl shadow-lg p-6 backdrop-blur-sm"><h3 class="font-bold text-xl mb-4 text-[#6F5E53]">오늘의 메뉴 🍽️</h3>${mealsHtml}</div>
+                            <div class="bg-white/50 rounded-2xl shadow-lg p-6 backdrop-blur-sm"><h3 class="font-bold text-xl mb-4 text-[#6F5E53]">준비 재료 🛒</h3>${ingredientsHtml}</div>
+                        </div>
+                    </div>`;
+            }
+
+            function switchView(viewId) {
+                document.querySelectorAll('.content-view').forEach(v => v.classList.remove('active'));
+                document.getElementById(`${viewId}-view`).classList.add('active');
+                document.querySelectorAll('.nav-btn').forEach(b => b.classList.toggle('active', b.dataset.view === viewId));
+            }
+
+            dateNavContainer.addEventListener('click', (e) => {
+                if (e.target.matches('.nav-btn')) {
+                    switchView(e.target.dataset.view);
+                }
+            });
+
+            function showModal() {
+                modal.classList.remove('opacity-0', 'pointer-events-none');
+                modalContent.classList.remove('scale-95');
+            }
+            function hideModal() {
+                modal.classList.add('opacity-0', 'pointer-events-none');
+                modalContent.classList.add('scale-95');
+            }
+            closeModalBtn.addEventListener('click', hideModal);
+            modal.addEventListener('click', (e) => e.target === modal && hideModal());
+
+            async function generateRecipe(dayKey, mealName) {
+                modalTitle.textContent = `✨ ${mealName} 레시피`;
+                modalBody.innerHTML = '';
+                modalLoader.style.display = 'flex';
+                showModal();
+                
+                const ingredients = Object.values(mealData[dayKey].i).join(', ');
+                const userQuery = `돌 아기를 위한 '${mealName}' 레시피를 만들어 주세요. 아래 재료들을 주로 사용해서, 아기가 소화하기 쉽고 안전하게 먹을 수 있는 간단한 조리법을 단계별로 알려주세요. 결과는 마크다운 형식으로 보기 좋게 정리해주세요.\n\n사용 가능한 재료:\n${ingredients}`;
+                
+                const apiKey = ""; 
+                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
+
+                if (!apiKey) {
+                    modalBody.innerHTML = `<p class="text-red-500 font-bold">오류: API 키가 없습니다.</p><p>HTML 파일의 'const apiKey = "";' 부분에 발급받으신 Gemini API 키를 입력해주세요.</p>`;
+                    modalLoader.style.display = 'none';
+                    return;
+                }
+
+                try {
+                    const response = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [{ parts: [{ text: userQuery }] }] }) });
+                    if (!response.ok) throw new Error(`API 요청 실패: ${response.status}`);
+                    const result = await response.json();
+                    const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
+                    if (text) {
+                        modalBody.innerHTML = text.replace(/### (.*)/g, '<h4 class="font-bold text-lg mt-4 mb-2">$1</h4>').replace(/## (.*)/g, '<h3 class="font-bold text-xl mt-6 mb-3">$1</h3>').replace(/\* \*(.*)\* \*/g, '<strong>$1</strong>').replace(/\* (.*)/g, '<li class="ml-4 list-disc">$1</li>').replace(/(\d+)\. (.*)/g, '<li class="ml-4">$1. $2</li>').replace(/\n/g, '<br>');
+                    } else { throw new Error("API로부터 유효한 응답을 받지 못했습니다."); }
+                } catch (error) {
+                    console.error('Error fetching recipe:', error);
+                    modalBody.innerHTML = `<p class="text-red-500">레시피를 불러오는 데 실패했습니다. 잠시 후 다시 시도해주세요. (API 키가 올바른지 확인해보세요)</p>`;
+                } finally {
+                    modalLoader.style.display = 'none';
+                }
+            }
+
+            contentArea.addEventListener('click', (e) => {
+                if (e.target.classList.contains('generate-recipe-btn')) {
+                    generateRecipe(e.target.dataset.day, e.target.dataset.meal);
+                }
+            });
+            
+            setupUI();
+            
+            const nutritionData = { '단백질': 14, '채소': 20, '과일': 5, '탄수화물': 5, '유제품/기타': 8 };
+            const ctx = document.getElementById('nutritionChart').getContext('2d');
+            
+            Chart.register(ChartDataLabels);
+
+            new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: Object.keys(nutritionData),
+                    datasets: [{
+                        label: '영양소 분포', data: Object.values(nutritionData),
+                        backgroundColor: ['#D8C3A5', '#8E8D8A', '#E98074', '#E85A4F', '#A58D78'],
+                        borderColor: '#FDFBF8', borderWidth: 4, hoverOffset: 10
+                    }]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: {
+                        legend: { 
+                            display: false 
+                        },
+                        tooltip: { 
+                            callbacks: { 
+                                label: c => `${c.label || ''}: ${((c.parsed / c.chart.data.datasets[0].data.reduce((a, b) => a + b, 0)) * 100).toFixed(1)}%` 
+                            } 
+                        },
+                        datalabels: {
+                            formatter: (value, context) => {
+                                const total = context.chart.data.datasets[0].data.reduce((a, b) => a + b, 0);
+                                const percentage = ((value / total) * 100).toFixed(1) + '%';
+                                const label = context.chart.data.labels[context.dataIndex];
+                                return `${label}\n${percentage}`;
+                            },
+                            color: '#fff',
+                            textAlign: 'center',
+                            font: {
+                                weight: 'bold',
+                                size: 12,
+                                family: "'Noto Sans KR', sans-serif"
+                            }
+                        }
+                    }
+                }
+            });
+        });
+    </script>
+</body>
+</html>
+
